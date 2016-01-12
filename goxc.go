@@ -19,7 +19,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -27,12 +26,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	//Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
-	//see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
+
+	// Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
+	// see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
 	"github.com/laher/goxc/config"
 	"github.com/laher/goxc/core"
 	"github.com/laher/goxc/platforms"
 	"github.com/laher/goxc/tasks"
+	_ "github.com/laher/goxc/tasks/github"
 )
 
 const (
@@ -47,9 +48,9 @@ var (
 	// e.g. go build -ldflags "-X main.VERSION 0.1.2-abcd" goxc.go
 	// thanks to minux for this advice
 	// So, goxc does this automatically during 'go build'
-	VERSION     = "0.14.2"
+	VERSION     = "0.17.1"
 	BUILD_DATE  = ""
-	SOURCE_DATE = "2014-08-16T23:13:37+12:00"
+	SOURCE_DATE = "2015-06-21T21:42:03+12:00"
 	// settings for this invocation of goxc
 	settings             config.Settings
 	fBuildSettings       config.BuildSettings
@@ -68,6 +69,7 @@ var (
 	isWriteConfig        bool
 	isWriteLocalConfig   bool
 	isVerbose            bool
+	isQuiet              bool
 	workingDirectoryFlag string
 	buildConstraints     string
 	maxProcessors        int
@@ -174,52 +176,10 @@ func goXC(call []string) error {
 		destPlatforms = platforms.ApplyBuildConstraints(settings.BuildConstraints, destPlatforms)
 		err := tasks.RunTasks(workingDirectory, destPlatforms, &settings, maxProcessors)
 		if err != nil {
-			log.Printf("RunTasks returned error %+v", err)
+			log.Printf("RunTasks error: %+v", err)
 		}
 		return err
 	}
-}
-
-//tasks (and task settings) are defined as args after the main flags
-func parseCliTasksAndTaskSettings(args []string) ([]string, map[string]map[string]interface{}, error) {
-	tasks := []string{}
-	taskSettings := map[string]map[string]interface{}{}
-	lastArg := ""
-	lastKey := ""
-	for _, arg := range args {
-		if lastKey != "" {
-			taskSettings[lastArg][lastKey] = arg
-			lastKey = ""
-		} else if strings.HasPrefix(arg, "-") {
-			taskSettings[lastArg] = map[string]interface{}{}
-			if strings.Contains(arg, "=") {
-				splut := strings.Split(arg, "=")
-				key := splut[0][1:]
-				//strip double-hyphen
-				if strings.HasPrefix(key, "-") {
-					key = key[1:]
-				}
-				val := splut[1]
-				taskSettings[lastArg][key] = val
-			} else {
-				key := arg[1:]
-				//strip double-hyphen
-				if strings.HasPrefix(key, "-") {
-					key = key[1:]
-				}
-				lastKey = key
-			}
-
-		} else {
-			tasks = append(tasks, arg)
-			lastArg = arg
-		}
-	}
-	if lastKey != "" {
-		return tasks, taskSettings, errors.New("Received a task setting with no value. Please at least use empty quotes")
-	}
-	//log.Printf("TaskSettings: %+v", taskSettings)
-	return tasks, taskSettings, nil
 }
 
 func flagVisitor(f *flag.Flag) {
@@ -279,18 +239,25 @@ func interpretFlags(call []string) {
 		flagSet.Visit(func(flg *flag.Flag) { specifiedFlags[flg.Name] = flg.Value  })
 		log.Printf("Specified cli flags: %s", specifiedFlags)
 		*/
+		if isQuiet {
+			settings.Verbosity = core.VerbosityQuiet
+		}
 		if isVerbose {
-			settings.Verbosity = core.VERBOSITY_VERBOSE
+			settings.Verbosity = core.VerbosityVerbose
 		}
 
 		//0.6 use args. Parse into slice.
 		//settings.Tasks = flagSet.Args()
 
 		//0.10.x: per-task flags
-		settings.Tasks, settings.TaskSettings, err = parseCliTasksAndTaskSettings(flagSet.Args())
+		settings.Tasks, settings.TaskSettings, err = config.ParseCliTasksAndTaskSettings(flagSet.Args())
 		if err != nil {
 			log.Printf("Error parsing arguments: %s", err)
 			os.Exit(1)
+		}
+		if settings.IsVerbose() {
+			log.Printf("Tasks from CLI: %+v", settings.Tasks)
+			log.Printf("Task settings from CLI: %+v", settings.TaskSettings)
 		}
 		settings.BuildSettings = &config.BuildSettings{}
 		settings.Env = []string{}
@@ -447,7 +414,6 @@ func mergeConfigIntoSettings(workingDirectory string) {
 		}
 	}
 
-	log.Printf("Working directory: '%s', Config name: '%s'", workingDirectory, configName)
 	err := mergeConfiguredSettings(workingDirectory, configName, isWriteConfig, isWriteLocalConfig)
 	//log.Printf("TaskSettings: %+v", settings.TaskSettings)
 	if err != nil {
@@ -455,6 +421,9 @@ func mergeConfigIntoSettings(workingDirectory string) {
 			log.Printf("Configuration file error. %s", err.Error())
 			os.Exit(1)
 		}
+	}
+	if settings.IsVerbose() {
+		log.Printf("Working directory: '%s', Config name: '%s'", workingDirectory, configName)
 	}
 }
 
@@ -530,7 +499,8 @@ func setupFlags() *flag.FlagSet {
 	flagSet.BoolVar(&isHelpTasks, "help-tasks", false, "Help about tasks")
 	flagSet.BoolVar(&isVersion, "version", false, "Print version")
 
-	flagSet.BoolVar(&isVerbose, "v", false, "Verbose")
+	flagSet.BoolVar(&isVerbose, "v", false, "Verbose output")
+	flagSet.BoolVar(&isQuiet, "q", false, "Quiet (no output except for errors)")
 	flagSet.StringVar(&isCliZipArchives, "z", "", "DEPRECATED (use archive & rmbin tasks instead): create ZIP archives instead of directories (true/false. default=true)")
 	flagSet.StringVar(&tasksToRun, "tasks", "", "Tasks to run. Use `goxc -ht` for more details")
 	flagSet.StringVar(&tasksPrepend, "+tasks", "", "Additional tasks to run first. See '-help tasks' for tasks list")

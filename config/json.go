@@ -19,12 +19,13 @@ package config
 import (
 	"encoding/json"
 	"errors"
-	"github.com/laher/goxc/core"
-	"github.com/laher/goxc/typeutils"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
+
+	"github.com/laher/goxc/core"
+	"github.com/laher/goxc/typeutils"
 )
 
 const (
@@ -293,7 +294,8 @@ func loadSettingsSection(settingsSection map[string]interface{}) (settings Setti
 		case "ConfigVersion":
 			settings.GoxcConfigVersion, err = typeutils.ToString(v, k)
 		case "BuildSettings":
-			m, err := typeutils.ToMap(v, k)
+			var m map[string]interface{}
+			m, err = typeutils.ToMap(v, k)
 			if err == nil {
 				settings.BuildSettings, err = buildSettingsFromMap(m)
 				if err == nil {
@@ -334,7 +336,9 @@ func writeJsonFile(settings Settings, jsonFile string) error {
 	}
 	//0.6 StripEmpties no longer required (use omitempty tag instead)
 
-	log.Printf("Writing file %s", jsonFile)
+	if settings.IsVerbose() {
+		log.Printf("Writing file %s", jsonFile)
+	}
 	return ioutil.WriteFile(jsonFile, data, 0644)
 }
 
@@ -346,7 +350,9 @@ func readJson(js []byte) (Settings, error) {
 	if err != nil {
 		log.Printf("Error: %v", err)
 	}
-	log.Printf("Settings: %+v", settings)
+	if settings.IsVerbose() {
+		log.Printf("Settings: %+v", settings)
+	}
 	return settings, err
 }
 

@@ -22,18 +22,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	//Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
-	//see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
-	"github.com/laher/goxc/core"
-	"github.com/laher/goxc/typeutils"
-	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
+
+	// Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
+	// see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
+	"github.com/laher/goxc/core"
+	"github.com/laher/goxc/tasks/httpc"
+	"github.com/laher/goxc/typeutils"
 )
 
 const TASK_BINTRAY = "bintray"
@@ -147,7 +147,7 @@ func runTaskBintray(tp TaskParams) error {
 	//_, err = fmt.Fprintf(f, "%s\n\n", fileheader)
 	//}
 	//	_, err = fmt.Fprintf(f, "%s downloads (version %s)\n-------------\n", tp.AppName, tp.Settings.GetFullVersionName())
-	//	if tp.Settings.IsVerbose() {
+	//	if !tp.Settings.IsQuiet() {
 	//		log.Printf("Read directory %s", versionDir)
 	//	}
 	//for 'first entry in dir' detection.
@@ -158,7 +158,7 @@ func runTaskBintray(tp TaskParams) error {
 	if err != nil {
 		return err
 	}
-	err = runTemplate(reportFilename, templateFile, templateText, out, report, format)
+	err = RunTemplate(reportFilename, templateFile, templateText, out, report, format)
 	if err != nil {
 		return err
 	}
@@ -204,7 +204,9 @@ func walkFunc(fullPath string, fi2 os.FileInfo, err error, reportFilename string
 		}
 	}
 	if matches == false {
-		log.Printf("Not included: %s (pattern %v)", relativePath, includeResources)
+		if !tp.Settings.IsQuiet() {
+			log.Printf("Not included: %s (pattern %v)", relativePath, includeResources)
+		}
 		return nil
 	}
 	for _, excludeGlob := range excludeGlobs {
@@ -213,7 +215,9 @@ func walkFunc(fullPath string, fi2 os.FileInfo, err error, reportFilename string
 			return err
 		}
 		if ok {
-			log.Printf("Excluded: %s (pattern %v)", relativePath, excludeGlob)
+			if !tp.Settings.IsQuiet() {
+				log.Printf("Excluded: %s (pattern %v)", relativePath, excludeGlob)
+			}
 			return nil
 		}
 	}
@@ -244,13 +248,15 @@ func walkFunc(fullPath string, fi2 os.FileInfo, err error, reportFilename string
 			text = "executable"
 		}
 	*/
+	//PUT /content/:subject/:repo/:package/:version/:path
 	url := apiHost + "/content/" + subject + "/" + repository + "/" + pkg + "/" + tp.Settings.GetFullVersionName() + "/" + relativePath
 	// for some reason there's no /pkg/ level in the downloads url.
 	downloadsUrl := downloadsHost + "/content/" + subject + "/" + repository + "/" + relativePath + "?direct"
-	resp, err := uploadFile("PUT", url, subject, user, apikey, fullPath, relativePath)
+	contentType := httpc.GetContentType(text)
+	resp, err := httpc.UploadFile("PUT", url, subject, user, apikey, fullPath, relativePath, contentType, !tp.Settings.IsQuiet())
 	if err != nil {
-		if serr, ok := err.(httpError); ok {
-			if serr.statusCode == 409 {
+		if serr, ok := err.(httpc.HttpError); ok {
+			if serr.StatusCode == 409 {
 				//conflict. skip
 				//continue but dont publish.
 				//TODO - provide an option to replace existing artifact
@@ -264,8 +270,9 @@ func walkFunc(fullPath string, fi2 os.FileInfo, err error, reportFilename string
 			return err
 		}
 	}
-
-	log.Printf("File uploaded. (expected empty map[]): %v", resp)
+	if !tp.Settings.IsQuiet() {
+		log.Printf("File uploaded. (expected empty map[]): %v", resp)
+	}
 	//commaIfRequired := ""
 	if first {
 		first = false
@@ -275,7 +282,7 @@ func walkFunc(fullPath string, fi2 os.FileInfo, err error, reportFilename string
 	if format == "markdown" {
 		text = strings.Replace(text, "_", "\\_", -1)
 	}
-	category := getCategory(relativePath)
+	category := GetCategory(relativePath)
 	download := BtDownload{text, downloadsUrl}
 	v, ok := report.Categories[category]
 	var existing []BtDownload
@@ -291,38 +298,23 @@ func walkFunc(fullPath string, fi2 os.FileInfo, err error, reportFilename string
 	if err != nil {
 		return err
 	}
-	err = publish(apiHost, user, apikey, subject, repository, pkg, tp.Settings.GetFullVersionName())
+	err = publish(apiHost, user, apikey, subject, repository, pkg, tp.Settings.GetFullVersionName(), !tp.Settings.IsQuiet())
 	return err
 }
 
-func publish(apihost, user, apikey, subject, repository, pkg, version string) error {
-	resp, err := doHttp("POST", apihost+"/content/"+subject+"/"+repository+"/"+pkg+"/"+version+"/publish", subject, user, apikey, nil, 0)
+func publish(apihost, user, apikey, subject, repository, pkg, version string, isVerbose bool) error {
+	resp, err := httpc.DoHttp("POST", apihost+"/content/"+subject+"/"+repository+"/"+pkg+"/"+version+"/publish", subject, user, apikey, "", nil, 0, isVerbose)
 	if err == nil {
 		log.Printf("Version published. %v", resp)
 	}
 	return err
 }
 
-//PUT /content/:subject/:repo/:package/:version/:path
-func uploadFile(method, url, subject, user, apikey, fullPath, relativePath string) (map[string]interface{}, error) {
-	file, err := os.Open(fullPath)
-	if err != nil {
-		log.Printf("Error reading file for upload: %v", err)
-		return nil, err
-	}
-	defer file.Close()
-	fi, err := file.Stat()
-	if err != nil {
-		log.Printf("Error statting file for upload: %v", err)
-		return nil, err
-	}
-	resp, err := doHttp(method, url, subject, user, apikey, file, fi.Size())
-	return resp, err
-}
+
 
 //NOTE: not necessary.
 //POST /packages/:subject/:repo/:package/versions
-func createVersion(apihost, user, apikey, subject, repository, pkg, version string) error {
+func createVersion(apihost, user, apikey, subject, repository, pkg, version string, isVerbose bool) error {
 	req := map[string]interface{}{"name": version, "release_notes": "built by goxc", "release_url": "http://x.x.x/x/x"}
 	requestData, err := json.Marshal(req)
 	if err != nil {
@@ -330,63 +322,16 @@ func createVersion(apihost, user, apikey, subject, repository, pkg, version stri
 	}
 	requestLength := len(requestData)
 	reader := bytes.NewReader(requestData)
-	resp, err := doHttp("POST", apihost+"/packages/"+subject+"/"+repository+"/"+pkg+"/versions", subject, user, apikey, reader, int64(requestLength))
+	resp, err := httpc.DoHttp("POST", apihost+"/packages/"+subject+"/"+repository+"/"+pkg+"/versions", subject, user, apikey, "", reader, int64(requestLength), isVerbose)
 	if err == nil {
-		log.Printf("Created new version. %v", resp)
+		if isVerbose {
+			log.Printf("Created new version. %v", resp)
+		}
 	}
 	return err
 }
 
-type httpError struct {
-	statusCode int
-	message    string
-}
-
-func (e httpError) Error() string {
-	return fmt.Sprintf("Error code: %d, message: %s", e.statusCode, e.message)
-}
-
-func doHttp(method, url, subject, user, apikey string, requestReader io.Reader, requestLength int64) (map[string]interface{}, error) {
-	client := &http.Client{}
-	req, err := http.NewRequest(method, url, requestReader)
-	if err != nil {
-		return nil, err
-	}
-	req.SetBasicAuth(user, apikey)
-	if requestLength > 0 {
-		log.Printf("Adding Header - Content-Length: %s", strconv.FormatInt(requestLength, 10))
-		req.ContentLength = requestLength
-	}
-	//log.Printf("req: %v", req)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	log.Printf("Http response received")
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	resp.Body.Close()
-
-	//200 is OK, 201 is Created, etc
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		log.Printf("Error code: %s", resp.Status)
-		log.Printf("Error body: %s", body)
-		return nil, httpError{resp.StatusCode, resp.Status}
-	}
-	log.Printf("Response status: '%s', Body: %s", resp.Status, body)
-	var b map[string]interface{}
-	if len(body) > 0 {
-		err = json.Unmarshal(body, &b)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return b, err
-}
-
-func getVersions(apihost, apikey, subject, repository, pkg string) ([]string, error) {
+func getVersions(apihost, apikey, subject, repository, pkg string, isVerbose bool) ([]string, error) {
 	client := &http.Client{}
 	url := apihost + "/packages/" + subject + "/" + repository + "/" + pkg
 	req, err := http.NewRequest("GET", url, nil)
@@ -412,7 +357,9 @@ func getVersions(apihost, apikey, subject, repository, pkg string) ([]string, er
 		log.Printf("Body: %s", body)
 		return nil, err
 	}
-	log.Printf("Body: %s", body)
+	if isVerbose {
+		log.Printf("Body: %s", body)
+	}
 	if versions, keyExists := b["versions"]; keyExists {
 		versionsSlice, err := typeutils.ToStringSlice(versions, "versions")
 

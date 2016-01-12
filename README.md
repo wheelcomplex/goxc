@@ -1,19 +1,21 @@
-goxc
+goxc  [![build status](http://img.shields.io/travis/laher/goxc.svg)](https://travis-ci.org/laher/goxc)
 ====
 
 [goxc](https://github.com/laher/goxc) is a build tool for Go, with a focus on cross-compiling and packaging.
 
-By default, goxc [g]zips (& .debs for Linux) the programs, and generates a 'downloads page' in markdown (with a Jekyll header). Goxc also provides integration with [bintray.com](https://bintray.com) for simple uploads.
+
+By default, goxc [g]zips (& .debs for Linux) the programs, and generates a 'downloads page' in markdown (with a Jekyll header).
 
 goxc is written in Go but uses *os.exec* to call 'go build' with the appropriate flags & env variables for each supported platform.
 
 goxc was inspired by Dave Cheney's Bash script [golang-crosscompile](https://github.com/davecheney/golang-crosscompile).
-BUT, goxc crosscompiles to all platforms at once. The artifacts are saved into a directory structure along with a markdown file of relative links.
 
-Thanks to [dchest](https://github.com/dchest) for the tidy-up and adding the zip feature, and [matrixik](https://bitbucket.org/matrixik) for his improvements and input. Thanks also to all the helpful issue reporters.
+ * goxc crosscompiles to all platforms at once. 
+ * The artifacts are saved into a directory structure along with a markdown file of relative links.
+ * Artifacts are packaged as zips, tgzs, or debs. Defaults for each OS/architecture.
+ * AND, goxc can now upload your files to github releases OR bintray.com. 
+ * **See ‘Github Releases’ section below.**
 
-**NOTE: Version 0.8.5 no longer supports go1.0. If you want go1.0 support please use goxc version 0.8.4 (see the git tag 'v0.8.4')**
-*the reason why I dropped go1.0 support is mentioned in issue #16*
 
 Notable Features
 ----------------
@@ -33,6 +35,7 @@ Notable Features
  * Packaging & distribution
  	* Zip (or tar.gz) archiving of cross-compiled artifacts & accompanying resources (READMEs etc)
  	* Packaging into .debs (for Debian/Ubuntu Linux)
+    * Upload to github.com releases.
  	* bintray.com integration (deploys binaries to bintray.com). *bintray.com registration required*
  	* 'downloads page' generation (markdown/html format; templatable).
  * Versioning:
@@ -63,12 +66,13 @@ goxc requires the go source and the go toolchain.
 
 		go get github.com/laher/goxc
 			
- 3. a. *Optional*: to pre-build the toolchains for all platforms:
+ 3. a. (just once per Go version): to pre-build the toolchains for all platforms:
 
 		goxc -t
 
 
-	* Note that this step is now optional, because goxc now builds/rebuilds the cross-compiler toolchains automatically, as necessary). 
+	* Note that rebuilding the toolchain is only required for Go up until v1.4. This step will become unnecessary in Go 1.5.
+	* Note that, until goxc v0.16.0, rebuilding the toolchain was triggered automatically. This has now been switched off (by default). Automatic rebuilding was causing a number of subtle bugs for different users, and has been switched off since v0.16.0.
 	* Also note that building the toolchain takes a while. Cross-compilation itself is quite fast.
 
 Basic Usage
@@ -140,18 +144,71 @@ Configuration file
 
 For repeatable builds (and some extra options), it is recomended to use goxc with one or more configuration file(s) to save and re-run compilations.
 
-To create a config file, just use the -wc (write config) option.
+To create a config file (`.goxc.json`), just use the -wc (write config) option.
 
 	goxc -wc -d=../site/downloads -bc="linux windows" xc -GOARM=7
 
 You can also use multiple config files to support different paremeters for each platform.
 
+The following would add a 'local' config file, `.goxc.local.json`. This file's contents will override `.goxc.json`. The idea of the .local.json files is to git-ignore them - for any local parameters which you only want on this particular computer, but not for other users or even for yourself on other computers/OS's.
+
+	goxc -wlc -d=../site/downloads
+
 The configuration file(s) feature is documented in much more detail in [the wiki](https://github.com/laher/goxc/wiki/config)
+
+
+Github Releases
+---------------
+
+This is the good stuff, so let’s go from the top.
+
+ * *First, install Go from source, and goxc. See ‘Installation’, above*
+
+ * If you haven’t already, build toolchain (all platforms!). This takes a while.
+
+```
+	goxc -t
+```
+
+ * Write a config file `.goxc.json` with info about your repo
+
+```
+	goxc -wc default publish-github -owner=<username> 
+	goxc -wc default publish-github -repository=<reponame>
+	cat .goxc.json
+```
+
+ * Bump a version, to get a meaningful version number.
+
+```
+	goxc bump
+```
+
+ * *Go to your github account and create a personal access token*
+
+[https://github.com/settings/tokens](https://github.com/settings/tokens)
+
+ * Write a local config file `.goxc.local.json` with your key info, ensuring that the key doesn’t end up in your git repo. See more about config files in [the wiki](https://github.com/laher/goxc/wiki/config)
+
+```
+	goxc -wlc default publish-github -apikey=123456789012
+	echo ".goxc.local.json" >> .gitignore
+```
+
+*Note that you can put a dummy key into the commandline and edit the file later with the real key.*
+
+ * Now, cross-compile, package and upload. All in one go.
+
+```
+	goxc
+```
+
+There’s heaps of ways to reconfigure each task to get the outcome you really want, but this produces some pretty sensible defaults. Have fun.
 
 Limitations
 -----------
 
- * Tested on Linux, Windows (and Mac during an early version). Please test on Mac and \*BSD
+ * Tested on Linux and Mac recently. Windows - some time ago now.
  * Currently goxc is only designed to build standalone Go apps without linked libraries. You can try but YMMV
  * The *API* is not considered stable yet, so please don't start embedding goxc method calls in your code yet - unless you 'Contact us' first! Then I can freeze some API details as required.
  * Bug: issue with config overriding. Empty strings do not currently override non-empty strings. e.g. `-pi=""` doesnt override the associated config setting PackageInfo
@@ -175,8 +232,6 @@ License
 
 See also
 --------
- * [Changelog](https://github.com/laher/goxc/wiki/changelog)
  * [Package Versioning](https://github.com/laher/goxc/wiki/versioning)
  * [Wiki home](https://github.com/laher/goxc/wiki)
  * [Contributions](https://github.com/laher/goxc/wiki/contributions)
- * [TODOs](https://github.com/laher/goxc/wiki/todo)

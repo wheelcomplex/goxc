@@ -17,15 +17,17 @@ package tasks
 */
 
 import (
-	//Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
-	//see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
-	"github.com/laher/goxc/config"
-	"github.com/laher/goxc/core"
-	"github.com/laher/goxc/platforms"
 	"log"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+
+	// Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
+	// see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
+	"github.com/laher/goxc/config"
+	"github.com/laher/goxc/core"
+	"github.com/laher/goxc/executils"
+	"github.com/laher/goxc/platforms"
 )
 
 var codesignTask = Task{
@@ -69,7 +71,9 @@ func codesignPlat(goos, arch string, binPath string, settings *config.Settings) 
 			log.Printf("codesign failed: %s", err)
 			return err
 		} else {
-			log.Printf("Signed with ID: %q", id)
+			if !settings.IsQuiet() {
+				log.Printf("Signed with ID: %q", id)
+			}
 			return nil
 		}
 	}
@@ -79,11 +83,6 @@ func codesignPlat(goos, arch string, binPath string, settings *config.Settings) 
 func signBinary(binPath string, id string) error {
 	cmd := exec.Command("codesign")
 	cmd.Args = append(cmd.Args, "-s", id, binPath)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	if err := cmd.Wait(); err != nil {
-		return err
-	}
-	return nil
+
+	return executils.StartAndWait(cmd)
 }

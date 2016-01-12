@@ -18,10 +18,11 @@ package tasks
 
 import (
 	"errors"
-	//Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
-	//see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
-	"github.com/laher/goxc/executils"
 	"os/exec"
+
+	// Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
+	// see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
+	"github.com/laher/goxc/executils"
 )
 
 const TASK_TAG = "tag"
@@ -48,13 +49,7 @@ func tag(tp TaskParams) error {
 		if err != nil {
 			return err
 		}
-		err = cmd.Start()
-		if err != nil {
-			return err
-		} else {
-			err = cmd.Wait()
-			return err
-		}
+		return executils.StartAndWait(cmd)
 	} else {
 		return errors.New("Only 'git' is supported at this stage")
 	}

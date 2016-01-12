@@ -18,15 +18,16 @@ package tasks
 
 import (
 	"errors"
-	//Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
-	//see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
+	"log"
+	"os"
+	"path/filepath"
+
+	// Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
+	// see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
 	"github.com/laher/goxc/archive"
 	"github.com/laher/goxc/config"
 	"github.com/laher/goxc/core"
 	"github.com/laher/goxc/platforms"
-	"log"
-	"os"
-	"path/filepath"
 )
 
 //runs automatically
@@ -100,7 +101,7 @@ func runArchiveTask(tp TaskParams, dest platforms.Platform, errchan chan error, 
 }
 
 func archivePlat(goos, arch string, mainDirs []string, workingDirectory, outDestRoot string, settings *config.Settings, ending string, archiver archive.Archiver, includeTopLevelDir bool) error {
-	resources := core.ParseIncludeResources(workingDirectory, settings.ResourcesInclude, settings.ResourcesExclude, settings.IsVerbose())
+	resources := core.ParseIncludeResources(workingDirectory, settings.ResourcesInclude, settings.ResourcesExclude, !settings.IsQuiet())
 	//log.Printf("Resources: %v", resources)
 	exes := []string{}
 	for _, mainDir := range mainDirs {
@@ -128,7 +129,9 @@ func archivePlat(goos, arch string, mainDirs []string, workingDirectory, outDest
 		log.Printf("ZIP error: %s", err)
 		return err
 	} else {
-		log.Printf("Artifact(s) archived to %s", archivePath)
+		if !settings.IsQuiet() {
+			log.Printf("Artifact(s) archived to %s", archivePath)
+		}
 	}
 	return nil
 }

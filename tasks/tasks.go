@@ -20,15 +20,16 @@ package tasks
 import (
 	"errors"
 	"fmt"
-	//Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
-	//see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
+	"log"
+	"runtime"
+	"strings"
+
+	// Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
+	// see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
 	"github.com/laher/goxc/config"
 	"github.com/laher/goxc/core"
 	"github.com/laher/goxc/platforms"
 	"github.com/laher/goxc/source"
-	"log"
-	"runtime"
-	"strings"
 )
 
 const (
@@ -53,6 +54,7 @@ const (
 	TASK_DEB_GEN        = "deb"
 	TASK_DEB_DEV        = "deb-dev"
 	TASK_DEB_SOURCE     = "deb-source"
+	TASK_PUBLISH_GITHUB = "publish-github"
 
 	TASKALIAS_ALL        = "all"
 	TASKALIAS_ARCHIVE    = "archive"
@@ -76,7 +78,7 @@ var (
 	TASKS_PKG_SOURCE                  = []string{TASK_DEB_SOURCE}
 	TASKS_VALIDATE                    = []string{TASK_GO_VET, TASK_GO_TEST}
 	TASKS_DEFAULT                     = append(append(append([]string{}, TASKS_VALIDATE...), TASKS_COMPILE...), TASKS_PACKAGE...)
-	TASKS_OTHER                       = []string{TASK_BUILD_TOOLCHAIN, TASK_GO_FMT}
+	TASKS_OTHER                       = []string{TASK_BUILD_TOOLCHAIN, TASK_GO_FMT, TASK_PUBLISH_GITHUB}
 	TASKS_ALL                         = append(append([]string{}, TASKS_OTHER...), TASKS_DEFAULT...)
 	TASK_ALIASES_FOR_MERGING_SETTINGS = map[string][]string{TASKALIAS_PKG_BUILD: TASKS_PKG_BUILD, TASKALIAS_PKG_SOURCE: TASKS_PKG_SOURCE, TASKALIAS_DEBS: TASKS_DEBS}
 
@@ -110,7 +112,7 @@ type TaskParams struct {
 type Task struct {
 	Name            string
 	Description     string
-	run             func(TaskParams) error
+	Run             func(TaskParams) error
 	DefaultSettings map[string]interface{}
 }
 
@@ -139,7 +141,9 @@ func generateParallelizedRunFunc(pTask ParallelizableTask) func(TaskParams) erro
 			return nil
 		}
 		numProcs := runtime.NumCPU()
-		log.Printf("Parallelizing %s for %d platforms, using max %d of %d processors", pTask.Name, platCount, tp.MaxProcessors, numProcs)
+		if !tp.Settings.IsQuiet() {
+			log.Printf("Parallelizing %s for %d platforms, using max %d of %d processors", pTask.Name, platCount, tp.MaxProcessors, numProcs)
+		}
 		errchan := make(chan error)
 		roundIdx := 0
 		roundCount := tp.MaxProcessors
@@ -197,7 +201,7 @@ func RegisterParallelizable(pTask ParallelizableTask) {
 	task := Task{
 		Name:            pTask.Name,
 		Description:     pTask.Description,
-		run:             generateParallelizedRunFunc(pTask),
+		Run:             generateParallelizedRunFunc(pTask),
 		DefaultSettings: pTask.DefaultSettings}
 	allTasks[task.Name] = task
 }
@@ -227,8 +231,8 @@ func ListTasks() []Task {
 
 // run all given tasks
 func RunTasks(workingDirectory string, destPlatforms []platforms.Platform, settings *config.Settings, maxProcessors int) error {
-	log.Printf("Using Go root: %s", settings.GoRoot)
 	if settings.IsVerbose() {
+		log.Printf("Using Go root: %s", settings.GoRoot)
 		log.Printf("looping through each platform")
 	}
 	appName := core.GetAppName(settings.AppName, workingDirectory)
@@ -262,8 +266,10 @@ func RunTasks(workingDirectory string, destPlatforms []platforms.Platform, setti
 			if e, _ := core.FileExists(taskName); e {
 				log.Printf("'%s' looks like a directory, not a task - specify 'working directory' with -wd option", taskName)
 			}
-			log.Printf("Task %s does NOT exist!", taskName)
-			return errors.New("Task " + taskName + " does not exist")
+			if settings.IsVerbose() {
+				log.Printf("Task '%s' does NOT exist!", taskName)
+			}
+			return errors.New("Task '" + taskName + "' does not exist")
 		}
 	}
 	mainDirs := []string{}
@@ -276,31 +282,38 @@ func RunTasks(workingDirectory string, destPlatforms []platforms.Platform, setti
 		excludes := core.ParseCommaGlobs(settings.MainDirsExclude)
 		excludesSource := core.ParseCommaGlobs(settings.SourceDirsExclude)
 		excludesSource = append(excludesSource, excludes...)
-		allPackages, err = source.FindSourceDirs(workingDirectory, "", excludesSource)
+		allPackages, err = source.FindSourceDirs(workingDirectory, "", excludesSource, settings.IsVerbose())
 		if err != nil || len(allPackages) == 0 {
 			log.Printf("Warning: could not establish list of source packages. Using working directory")
 			allPackages = []string{workingDirectory}
 		}
-		mainDirs, err = source.FindMainDirs(workingDirectory, excludes)
+		mainDirs, err = source.FindMainDirs(workingDirectory, excludes, settings.IsVerbose())
 		if err != nil || len(mainDirs) == 0 {
 			log.Printf("Warning: could not find any main dirs: %v", err)
 		} else {
-			log.Printf("Found 'main package' dirs (len %d): %v", len(mainDirs), mainDirs)
+			if settings.IsVerbose() {
+				log.Printf("Found 'main package' dirs (len %d): %v", len(mainDirs), mainDirs)
+			}
 		}
 	}
-	log.Printf("Running tasks: %v", tasksToRun)
 	if settings.IsVerbose() {
+		log.Printf("Running tasks: %v", tasksToRun)
 		log.Printf("All packages: %v", allPackages)
 	}
 	for _, taskName := range tasksToRun {
 		log.SetPrefix("[goxc:" + taskName + "] ")
+		if settings.IsVerbose() {
+			log.Printf("Running task %s with settings: %v", taskName, settings.TaskSettings[taskName])
+		}
 		err := runTask(taskName, destPlatforms, allPackages, mainDirs, appName, workingDirectory, outDestRoot, settings, maxProcessors)
 		if err != nil {
 			// TODO: implement 'force' option.
 			log.Printf("Stopping after '%s' failed with error '%v'", taskName, err)
 			return err
 		} else {
-			log.Printf("Task %s succeeded", taskName)
+			if !settings.IsQuiet() {
+				log.Printf("Task %s succeeded", taskName)
+			}
 		}
 	}
 	return nil
@@ -310,7 +323,7 @@ func RunTasks(workingDirectory string, destPlatforms []platforms.Platform, setti
 func runTask(taskName string, destPlatforms []platforms.Platform, mainDirs []string, allPackages []string, appName, workingDirectory, outDestRoot string, settings *config.Settings, maxProcessors int) error {
 	if taskV, keyExists := allTasks[taskName]; keyExists {
 		tp := TaskParams{destPlatforms, mainDirs, allPackages, appName, workingDirectory, outDestRoot, settings, maxProcessors}
-		return taskV.run(tp)
+		return taskV.Run(tp)
 	}
 	log.Printf("Unrecognised task '%s'", taskName)
 	return fmt.Errorf("Unrecognised task '%s'", taskName)

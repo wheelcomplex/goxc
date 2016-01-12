@@ -17,14 +17,15 @@ package tasks
 */
 
 import (
-	//Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
-	//see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
-	"github.com/laher/goxc/core"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	// Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
+	// see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
+	"github.com/laher/goxc/core"
 )
 
 //runs automatically
@@ -37,9 +38,11 @@ func init() {
 }
 
 func runTaskCopyResources(tp TaskParams) error {
-	resources := core.ParseIncludeResources(tp.WorkingDirectory, tp.Settings.ResourcesInclude, tp.Settings.ResourcesExclude, tp.Settings.IsVerbose())
+	resources := core.ParseIncludeResources(tp.WorkingDirectory, tp.Settings.ResourcesInclude, tp.Settings.ResourcesExclude, !tp.Settings.IsQuiet())
 	destFolder := filepath.Join(tp.OutDestRoot, tp.Settings.GetFullVersionName())
-	log.Printf("resources: %v", resources)
+	if !tp.Settings.IsQuiet() {
+		log.Printf("resources: %v", resources)
+	}
 	for _, resource := range resources {
 		if strings.HasPrefix(resource, tp.WorkingDirectory) {
 			resource = resource[len(tp.WorkingDirectory)+1:]
@@ -61,7 +64,7 @@ func runTaskCopyResources(tp TaskParams) error {
 			if err != nil && !os.IsExist(err) {
 				return err
 			}
-			_, err = copyFile(sourcePath, destPath)
+			_, err = copyFile(sourcePath, destPath, !tp.Settings.IsQuiet())
 		}
 		if err != nil {
 			return err
@@ -70,7 +73,7 @@ func runTaskCopyResources(tp TaskParams) error {
 	return nil
 }
 
-func copyDir(srcDir, destDir string) (fileCount int, err error) {
+func copyDir(srcDir, destDir string, isVerbose bool) (fileCount int, err error) {
 	fileCount = 0
 	err = os.MkdirAll(destDir, 0777)
 	if err != nil && !os.IsExist(err) {
@@ -88,16 +91,20 @@ func copyDir(srcDir, destDir string) (fileCount int, err error) {
 				return err
 			}
 		} else {
-			log.Printf("path: %s, base: %s", path, base)
-			_, err := copyFile(path, dest)
+			if isVerbose {
+				log.Printf("path: %s, base: %s", path, base)
+			}
+			_, err := copyFile(path, dest, isVerbose)
 			return err
 		}
 	})
 	return
 }
 
-func copyFile(srcName, dstName string) (written int64, err error) {
-	log.Printf("Copying file %s to %s", srcName, dstName)
+func copyFile(srcName, dstName string, isVerbose bool) (written int64, err error) {
+	if isVerbose {
+		log.Printf("Copying file %s to %s", srcName, dstName)
+	}
 	src, err := os.Open(srcName)
 	if err != nil {
 		return

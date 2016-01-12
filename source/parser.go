@@ -27,11 +27,11 @@ import (
 	"strings"
 )
 
-func FindMainDirs(root string, excludingGlobs []string) ([]string, error) {
-	return FindSourceDirs(root, "main", excludingGlobs)
+func FindMainDirs(root string, excludingGlobs []string, isVerbose bool) ([]string, error) {
+	return FindSourceDirs(root, "main", excludingGlobs, isVerbose)
 }
 
-func FindSourceDirs(root string, packageNameFilter string, excludingGlobs []string) ([]string, error) {
+func FindSourceDirs(root string, packageNameFilter string, excludingGlobs []string, isVerbose bool) ([]string, error) {
 	mainDirs := []string{}
 	sourceFiles := []string{}
 	root, err := filepath.Abs(root)
@@ -39,7 +39,14 @@ func FindSourceDirs(root string, packageNameFilter string, excludingGlobs []stri
 		log.Printf("Error resolving root dir: %v", err)
 		return []string{}, err
 	}
-	err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		log.Printf("Error resolving root dir (EvalSymlinks): %v", err)
+		return []string{}, err
+	}
+	err = filepath.Walk(root, func(path string, info os.FileInfo, inerr error) error {
+
+		var err error
 		//find files ending with .go
 		//check for 'package main'
 		//if strings.Contains(path, string(filepath.Separator) + ".") {
@@ -54,15 +61,13 @@ func FindSourceDirs(root string, packageNameFilter string, excludingGlobs []stri
 				return filepath.SkipDir
 			} else {
 				//only log if it's a go file
-				if strings.HasSuffix(path, ".go") {
+				if strings.HasSuffix(path, ".go") && isVerbose {
 					log.Printf("Ignoring '.hidden' file %s", path)
 				}
 			}
-		} else {
-			if strings.HasSuffix(path, ".go") {
-				//read file and check package
-				sourceFiles = append(sourceFiles, path)
-			}
+		} else if strings.HasSuffix(path, ".go") {
+			//read file and check package
+			sourceFiles = append(sourceFiles, path)
 		}
 		return err
 	})
@@ -89,7 +94,9 @@ func FindSourceDirs(root string, packageNameFilter string, excludingGlobs []stri
 						//ignore this exclusion glob
 						log.Printf("Glob error: %s: %s", exclGlob, err)
 					} else if matches {
-						log.Printf("Main dir '%s' excluded by glob '%s'", mainDir, exclGlob)
+						if isVerbose {
+							log.Printf("Main dir '%s' excluded by glob '%s'", mainDir, exclGlob)
+						}
 						excluded = true
 					} else {
 						absExcl, err := filepath.Abs(filepath.Join(root, exclGlob))
@@ -97,7 +104,9 @@ func FindSourceDirs(root string, packageNameFilter string, excludingGlobs []stri
 							//ignore
 							log.Printf("Abs error: %s: %v", filepath.Join(root, exclGlob), err)
 						} else if strings.HasPrefix(mainDir, absExcl) {
-							log.Printf("Main dir '%s' excluded because it is in '%s'", mainDir, absExcl)
+							if isVerbose {
+								log.Printf("Main dir '%s' excluded because it is in '%s'", mainDir, absExcl)
+							}
 							excluded = true
 						} else {
 							//log.Printf("Main dir '%s' is NOT in '%s'", mainDir, absExcl)
@@ -149,16 +158,15 @@ func LoadFiles(filenames []string) ([]*ast.File, error) {
 	return files, nil
 }
 
-func FindConstantValue(f *ast.File, name string) *ast.BasicLit {
-	return FindValue(f, name, []token.Token{token.CONST})
+func FindConstantValue(f *ast.File, name string, isVerbose bool) *ast.BasicLit {
+	return FindValue(f, name, []token.Token{token.CONST}, isVerbose)
 }
 
 //TODO: refactor to more idiomatic version of this (e.g. use Visit?)
-func FindValue(f *ast.File, name string, toks []token.Token) *ast.BasicLit {
+func FindValue(f *ast.File, name string, toks []token.Token, isVerbose bool) *ast.BasicLit {
 	isName := false
 	isTok := false
 	value := ""
-	found := false
 	var ret *ast.BasicLit
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch x := n.(type) {
@@ -173,9 +181,10 @@ func FindValue(f *ast.File, name string, toks []token.Token) *ast.BasicLit {
 			if isName && isTok {
 				//strip quotes
 				value = strings.Replace(x.Value, "\"", "", -1)
-				log.Printf("Found value (%s)", value)
+				if isVerbose {
+					log.Printf("Found value (%s)", value)
+				}
 				ret = x
-				found = true
 				isName = false
 				return false //break out
 			}

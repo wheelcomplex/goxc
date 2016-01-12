@@ -34,7 +34,7 @@ const (
 	RESOURCES_INCLUDE_DEFAULT = "INSTALL*,README*,LICENSE*"
 	RESOURCES_EXCLUDE_DEFAULT = "*.go" //TODO
 	// Main dirs to exclude by default (Godeps!)
-	MAIN_DIRS_EXCLUDE_DEFAULT = "Godeps"
+	MAIN_DIRS_EXCLUDE_DEFAULT = "Godeps,testdata,_project,vendor"
 
 	OS_DEFAULT              = ""
 	ARCH_DEFAULT            = ""
@@ -42,9 +42,9 @@ const (
 	PRERELEASE_INFO_DEFAULT = "SNAPSHOT"
 	BRANCH_ORIGINAL         = "original"
 
-	VERBOSITY_DEFAULT = "d"
-	VERBOSITY_QUIET   = "q" //TODO
-	VERBOSITY_VERBOSE = "v"
+	VerbosityDefault = "d"
+	VerbosityQuiet   = "q" //TODO
+	VerbosityVerbose = "v"
 	//0.4 removed in favour of associated tasks
 	//ARTIFACT_TYPE_ZIP = "zip"
 	//ARTIFACT_TYPE_BIN = "bin"

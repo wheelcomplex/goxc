@@ -17,19 +17,20 @@ package tasks
 */
 
 import (
-	"github.com/debber/debber-v0.3/deb"
-	"github.com/debber/debber-v0.3/debgen"
-	//Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
-	//see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
 	"fmt"
-	"github.com/laher/goxc/config"
-	"github.com/laher/goxc/core"
-	"github.com/laher/goxc/platforms"
-	"github.com/laher/goxc/typeutils"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/debber/debber-v0.3/deb"
+	"github.com/debber/debber-v0.3/debgen"
+	// Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
+	// see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
+	"github.com/laher/goxc/config"
+	"github.com/laher/goxc/core"
+	"github.com/laher/goxc/platforms"
+	"github.com/laher/goxc/typeutils"
 )
 
 //runs automatically
@@ -50,6 +51,7 @@ func init() {
 			"armarch":             "",
 			"go-sources-dir":      ".",
 			"other-mappped-files": map[string]interface{}{},
+			"bin-dir":             "/usr/bin",
 		},
 	})
 }
@@ -99,20 +101,16 @@ func getArmArchName(settings *config.Settings) string {
 	return armArchName
 }
 
-func debBuild(dest platforms.Platform, tp TaskParams) error {
-	metadata := tp.Settings.GetTaskSettingMap(TASK_DEB_GEN, "metadata")
-	armArchName := getArmArchName(tp.Settings)
-	//maintain support for old configs ...
-	metadataDebX := tp.Settings.GetTaskSettingMap(TASK_DEB_GEN, "metadata-deb")
+func calcOtherMappedFiles(otherMappedFilesFromSetting map[string]interface{}) (map[string]string, error) {
+
 	otherMappedFiles := map[string]string{}
-	otherMappedFilesFromSetting := tp.Settings.GetTaskSettingMap(TASK_DEB_GEN, "other-mapped-files")
-	if otherMappedFiles != nil {
+	if otherMappedFilesFromSetting != nil {
 		for k, v := range otherMappedFilesFromSetting {
 			val, ok := v.(string)
 			if ok {
 				finf, err := os.Stat(val)
 				if err != nil {
-					return err
+					return otherMappedFiles, err
 				}
 				if finf.IsDir() {
 					filepath.Walk(val, func(path string, info os.FileInfo, err error) error {
@@ -125,7 +123,7 @@ func debBuild(dest platforms.Platform, tp TaskParams) error {
 							if strings.HasSuffix(k, "/") {
 								key = k + kpath
 							} else {
-								key = k+"/"+kpath
+								key = k + "/" + kpath
 							}
 							otherMappedFiles[key] = path
 						}
@@ -137,7 +135,23 @@ func debBuild(dest platforms.Platform, tp TaskParams) error {
 			}
 		}
 	}
-	log.Printf("other mapped files: %+v", otherMappedFiles)
+	return otherMappedFiles, nil
+}
+
+func debBuild(dest platforms.Platform, tp TaskParams) error {
+	metadata := tp.Settings.GetTaskSettingMap(TASK_DEB_GEN, "metadata")
+	armArchName := getArmArchName(tp.Settings)
+	//maintain support for old configs ...
+	metadataDebX := tp.Settings.GetTaskSettingMap(TASK_DEB_GEN, "metadata-deb")
+	otherMappedFilesFromSetting := tp.Settings.GetTaskSettingMap(TASK_DEB_GEN, "other-mapped-files")
+	otherMappedFiles, err := calcOtherMappedFiles(otherMappedFilesFromSetting)
+	if err != nil {
+		return err
+	}
+
+	if tp.Settings.IsVerbose() {
+		log.Printf("other mapped files: %+v", otherMappedFiles)
+	}
 	metadataDeb := map[string]string{}
 	for k, v := range metadataDebX {
 		val, ok := v.(string)
@@ -157,7 +171,7 @@ func debBuild(dest platforms.Platform, tp TaskParams) error {
 			return err
 		}
 	}
-	longDescription := " "
+	longDescription := ""
 	if ldesc, keyExists := metadata["long-description"]; keyExists {
 		var err error
 		longDescription, err = typeutils.ToString(ldesc, "long-description")
@@ -214,6 +228,7 @@ func debBuild(dest platforms.Platform, tp TaskParams) error {
 	if err != nil {
 		return fmt.Errorf("Error preparing deb generator: %v", err)
 	}
+	binDir := tp.Settings.GetTaskSettingString(TASK_DEB_GEN, "bin-dir")
 	//there should only be one for this platform.
 	// Anyway this part maps all binaries.
 	for _, dgen := range dgens {
@@ -233,7 +248,7 @@ func debBuild(dest platforms.Platform, tp TaskParams) error {
 				if dgen.DataFiles == nil {
 					dgen.DataFiles = map[string]string{}
 				}
-				dgen.DataFiles["./usr/bin/"+exeName] = binPath
+				dgen.DataFiles["."+binDir+"/"+exeName] = binPath
 			}
 			for k, v := range otherMappedFiles {
 				dgen.DataFiles[k] = v
@@ -242,7 +257,9 @@ func debBuild(dest platforms.Platform, tp TaskParams) error {
 			if err != nil {
 				return fmt.Errorf("Error generating deb: %v", err)
 			}
-			log.Printf("Wrote deb to %s", filepath.Join(build.DestDir, dgen.DebWriter.Filename))
+			if !tp.Settings.IsQuiet() {
+				log.Printf("Wrote deb to %s", filepath.Join(build.DestDir, dgen.DebWriter.Filename))
+			}
 		}
 	}
 	return err

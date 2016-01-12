@@ -18,15 +18,16 @@ package tasks
 
 import (
 	"errors"
-	"github.com/laher/goxc/config"
-	"github.com/laher/goxc/core"
-	"github.com/laher/goxc/executils"
-	"github.com/laher/goxc/platforms"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+
+	"github.com/laher/goxc/config"
+	"github.com/laher/goxc/core"
+	"github.com/laher/goxc/executils"
+	"github.com/laher/goxc/platforms"
 )
 
 //runs automatically
@@ -91,8 +92,9 @@ func buildToolchain(goos string, arch string, settings *config.Settings) error {
 	//0.8.5: no longer using cgoEnabled
 	env := []string{"GOOS=" + goos, "GOARCH=" + arch}
 	extraEnv := settings.GetTaskSettingStringSlice(TASK_BUILD_TOOLCHAIN, "extra-env")
-	log.Printf("extra-env: %v", extraEnv)
-
+	if settings.IsVerbose() {
+		log.Printf("extra-env: %v", extraEnv)
+	}
 	env = append(env, extraEnv...)
 	if goos == platforms.LINUX && arch == platforms.ARM {
 		// see http://dave.cheney.net/2012/09/08/an-introduction-to-cross-compilation-with-go
@@ -103,23 +105,19 @@ func buildToolchain(goos string, arch string, settings *config.Settings) error {
 		}
 	}
 
-	log.Printf("Setting env: %v", env)
+	if settings.IsVerbose() {
+		log.Printf("Setting env: %v", env)
+	}
 	cmd.Env = append([]string{}, os.Environ()...)
 	cmd.Env = append(cmd.Env, env...)
 	if settings.IsVerbose() {
 		log.Printf("'make' env: GOOS=%s GOARCH=%s GOROOT=%s", goos, arch, goroot)
+		log.Printf("Invoking '%v' from %s", executils.PrintableArgs(cmd.Args), cmd.Dir)
 	}
-	log.Printf("Invoking '%v' from %s", executils.PrintableArgs(cmd.Args), cmd.Dir)
 	executils.RedirectIO(cmd)
-	err := cmd.Start()
+	err := executils.StartAndWait(cmd)
 	if err != nil {
-		log.Printf("Build toolchain: Launch error: %s", err)
-		return err
-	}
-	err = cmd.Wait()
-	if err != nil {
-		log.Printf("Build Toolchain: wait error: %s", err)
-		return err
+		log.Printf("Build toolchain: %s", err)
 	}
 	if settings.IsVerbose() {
 		log.Printf("Complete")

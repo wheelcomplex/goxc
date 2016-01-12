@@ -18,9 +18,10 @@ package config
 */
 
 import (
+	"log"
+
 	"github.com/laher/goxc/core"
 	"github.com/laher/goxc/typeutils"
-	"log"
 )
 
 /* 0.9: removed!
@@ -104,7 +105,11 @@ type Settings struct {
 }
 
 func (s *Settings) IsVerbose() bool {
-	return s.Verbosity == core.VERBOSITY_VERBOSE
+	return s.Verbosity == core.VerbosityVerbose
+}
+
+func (s *Settings) IsQuiet() bool {
+	return s.Verbosity == core.VerbosityQuiet
 }
 
 func (s *Settings) IsTask(taskName string) bool {
@@ -143,11 +148,15 @@ func (s *Settings) MergeAliasedTaskSettings(aliases map[string][]string) {
 					aliasedTaskValue, exists := s.TaskSettings[aliasedTask]
 					//if settings already exists for the actual task - merge
 					if exists {
-						log.Printf("Task settings specified for %s. Merging %v with %v", aliasedTask, aliasedTaskValue, taskSettingValue)
+						if s.IsVerbose() {
+							log.Printf("Task settings specified for %s. Merging %v with %v", aliasedTask, aliasedTaskValue, taskSettingValue)
+						}
 						// merge
 						s.TaskSettings[aliasedTask] = typeutils.MergeMaps(aliasedTaskValue, taskSettingValue)
 					} else {
-						log.Printf("alias didnt exist. Setting %s to %v", aliasedTask, taskSettingValue)
+						if s.IsVerbose() {
+							log.Printf("alias didnt exist. Setting %s to %v", aliasedTask, taskSettingValue)
+						}
 						//add ...
 						s.TaskSettings[aliasedTask] = taskSettingValue
 					}
@@ -210,6 +219,9 @@ func (s *Settings) GetTaskSettingString(taskName, settingName string) string {
 
 func (s *Settings) GetTaskSettingBool(taskName, settingName string) bool {
 	retUntyped := s.GetTaskSetting(taskName, settingName)
+	if s.IsVerbose() {
+		log.Printf("Setting %s.%s resolves to %v", taskName, settingName, retUntyped)
+	}
 	if retUntyped == nil {
 		return false
 	}

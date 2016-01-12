@@ -48,6 +48,19 @@ func ToBool(v interface{}, k string) (bool, error) {
 	switch typedV := v.(type) {
 	case bool:
 		return typedV, nil
+	case string:
+		switch typedV {
+		case "true":
+			return true, nil
+		case "True":
+			return true, nil
+		case "TRUE":
+			return true, nil
+		case "1":
+			return true, nil
+		default:
+			return false, nil
+		}
 	}
 	return false, fmt.Errorf("%s should be a json boolean, not a %T", k, v)
 }
@@ -112,6 +125,23 @@ func MergeMapsStringMapStringInterface(high, low map[string]map[string]interface
 		}
 	}
 	return high
+}
+
+func AreMapStringMapStringInterfacesEqual(a, b map[string]map[string]interface{}) bool {
+	if a == nil {
+		return b == nil
+	} else {
+		if len(a) != len(b) {
+			return false
+		}
+		for key, aVal := range a {
+			bVal := b[key]
+			if !AreMapsEqual(aVal, bVal) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func AreMapsEqual(a, b map[string]interface{}) bool {

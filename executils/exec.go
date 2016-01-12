@@ -25,16 +25,17 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	//Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
-	//see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
-	"github.com/laher/goxc/config"
-	"github.com/laher/goxc/platforms"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"text/template"
 	"time"
+
+	// Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
+	// see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
+	"github.com/laher/goxc/config"
+	"github.com/laher/goxc/platforms"
 )
 
 var (
@@ -82,9 +83,15 @@ func buildFlags(args map[string]interface{}, flag string) string {
 	for k, v := range args {
 		switch typedV := v.(type) {
 		case string:
-			buf.WriteString(flag + " " + k + " '" + typedV + "' ")
+			_, err := buf.WriteString(flag + " " + k + "='" + typedV + "' ")
+			if err != nil {
+				log.Printf("Error writing flags")
+			}
 		default:
-			buf.WriteString(fmt.Sprintf("%s %s '%v' ", flag, k, typedV))
+			_, err := buf.WriteString(fmt.Sprintf("%s %s='%v' ", flag, k, typedV))
+			if err != nil {
+				log.Printf("Error writing flags")
+			}
 		}
 	}
 	return buf.String()
@@ -112,12 +119,11 @@ func splitEnvVar(asString string) (string, string, error) {
 // 0.3.1
 // v0.9 changed signature
 func InvokeGo(workingDirectory string, subCmd string, subCmdArgs []string, env []string, settings *config.Settings) error {
-	isVerbose := settings.IsVerbose()
 	fullVersionName := settings.GetFullVersionName()
 	//var buildSettings config.BuildSettings
 	buildSettings := settings.BuildSettings
 	goRoot := settings.GoRoot
-	if isVerbose {
+	if settings.IsVerbose() {
 		log.Printf("build settings: %s", goRoot)
 	}
 	cmdPath := filepath.Join(goRoot, "bin", "go")
@@ -226,46 +232,67 @@ func InvokeGo(workingDirectory string, subCmd string, subCmdArgs []string, env [
 		}
 	}
 	args = append(args, subCmdArgs...)
-	cmd, err := NewCmd(cmdPath, workingDirectory, args, env, isVerbose, true)
+	cmd, err := NewCmd(cmdPath, workingDirectory, args, env, settings.IsVerbose(), !settings.IsQuiet())
 	if err != nil {
 		return err
 	}
-	log.Printf("invoking '%s %v' from '%s'", cmdPath, PrintableArgs(args), workingDirectory)
-	err = cmd.Start()
+	if settings.IsVerbose() {
+		log.Printf("invoking '%s %v' from '%s'", cmdPath, PrintableArgs(args), workingDirectory)
+	}
+
+	err = StartAndWait(cmd)
 	if err != nil {
-		log.Printf("Launch error: %s", err)
+		log.Printf("'go' returned error: %s", err)
 		return err
-	} else {
-		err = cmd.Wait()
-		if err != nil {
-			log.Printf("'go' returned error: %s", err)
-			return err
-		} else {
-			if isVerbose {
-				log.Printf("'go' completed successfully")
-			}
-		}
+	}
+	if settings.IsVerbose() {
+		log.Printf("'go' completed successfully")
 	}
 	return nil
 
 }
 
-func NewCmd(cmdPath string, workingDirectory string, args []string, env []string, isVerbose bool, isRedirect bool) (*exec.Cmd, error) {
+func NewCmd(cmdPath string, workingDirectory string, args []string, env []string, isVerbose bool, isRedirectToStdout bool) (*exec.Cmd, error) {
 	cmd := exec.Command(cmdPath)
-	if isRedirect {
+	if isRedirectToStdout {
 		RedirectIO(cmd)
 	}
 	return cmd, PrepareCmd(cmd, workingDirectory, args, env, isVerbose)
 }
 
-func PrepareCmd(cmd *exec.Cmd, workingDirectory string, args []string, env []string, isVerbose bool) error {
+func PrepareCmd(cmd *exec.Cmd, workingDirectory string, args []string, env []string, isVeryVerbose bool) error {
 	cmd.Args = append(cmd.Args, args...)
 	cmd.Dir = workingDirectory
-	cmd.Env = CombineActualEnv(append(cmd.Env, env...), isVerbose)
+	cmd.Env = CombineActualEnv(append(cmd.Env, env...), isVeryVerbose)
 	return nil
 }
 
-func CombineActualEnv(env []string, isVerbose bool) []string {
+// StartAndWait starts the given command and waits for it to exit.  If the
+// command started successfully but exited with an error, any output to stderr
+// is included in the error message.
+func StartAndWait(cmd *exec.Cmd) error {
+	stderr := &bytes.Buffer{}
+	if cmd.Stderr == nil {
+		cmd.Stderr = stderr
+	} else {
+		cmd.Stderr = io.MultiWriter(cmd.Stderr, stderr)
+	}
+	err := cmd.Start()
+	if err != nil {
+		return fmt.Errorf("Launch error: %s", err)
+	} else {
+		err = cmd.Wait()
+		if err != nil {
+			if stderr.Len() > 0 {
+				return fmt.Errorf("Wait error: %s: %s", err, strings.TrimSpace(stderr.String()))
+			}
+			return fmt.Errorf("Wait error: %s", err)
+		}
+		return err
+	}
+}
+
+func CombineActualEnv(env []string, isVeryVerbose bool) []string {
 	//0.7.4 env replaces os.Environ
 	cmdEnv := []string{}
 	cmdEnv = append(cmdEnv, env...)
@@ -277,7 +304,9 @@ func CombineActualEnv(env []string, isVerbose bool) []string {
 			specifiedEnvItemSplit := strings.Split(specifiedEnvItem, "=")
 			specifiedEnvKey := specifiedEnvItemSplit[0]
 			if specifiedEnvKey == key {
-				log.Printf("Overriding ENV variable (%s replaces %s)", specifiedEnvItem, thisProcessEnvItem)
+				if isVeryVerbose {
+					log.Printf("Overriding ENV variable (%s replaces %s)", specifiedEnvItem, thisProcessEnvItem)
+				}
 				exists = true
 			}
 		}
@@ -285,11 +314,11 @@ func CombineActualEnv(env []string, isVerbose bool) []string {
 			cmdEnv = append(cmdEnv, thisProcessEnvItem)
 		}
 	}
-	if isVerbose {
+	if isVeryVerbose {
 		log.Printf("(verbose!) all env vars for 'go': %s", cmdEnv)
-	}
-	if env != nil && len(env) > 0 {
-		log.Printf("specified env vars for 'go': %s", env)
+		if env != nil && len(env) > 0 {
+			log.Printf("specified env vars for 'go': %s", env)
+		}
 	}
 	return cmdEnv
 }

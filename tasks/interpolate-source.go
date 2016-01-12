@@ -18,9 +18,6 @@ package tasks
 
 import (
 	"fmt"
-	//Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
-	//see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
-	"github.com/laher/goxc/source"
 	"go/parser"
 	"go/printer"
 	"go/token"
@@ -28,6 +25,10 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	// Tip for Forkers: please 'clone' from my url and then 'pull' from your url. That way you wont need to change the import path.
+	// see https://groups.google.com/forum/?fromgroups=#!starred/golang-nuts/CY7o2aVNGZY
+	"github.com/laher/goxc/source"
 )
 
 const (
@@ -67,7 +68,9 @@ func writeVar(tp TaskParams, varname, varval string) (err error) {
 		if err != nil {
 			return err
 		}
-		log.Printf("Source files: %v", matches)
+		if tp.Settings.IsVerbose() {
+			log.Printf("Source files: %v", matches)
+		}
 		fset := token.NewFileSet() // positions are relative to fset
 		found := false
 		for _, match := range matches {
@@ -76,11 +79,13 @@ func writeVar(tp TaskParams, varname, varval string) (err error) {
 				return err
 			}
 			//find version var
-			versionVar := source.FindValue(f, varname, []token.Token{token.CONST, token.VAR})
+			versionVar := source.FindValue(f, varname, []token.Token{token.CONST, token.VAR}, tp.Settings.IsVerbose())
 			if versionVar != nil {
 				found = true
 				varvalQuoted := fmt.Sprintf("\"%s\"", varval)
-				log.Printf("Changing source of '%s' = %v -> %s", varname, versionVar.Value, varvalQuoted)
+				if !tp.Settings.IsQuiet() {
+					log.Printf("Changing source of '%s' = %v -> %s", varname, versionVar.Value, varvalQuoted)
+				}
 				versionVar.Value = varvalQuoted
 				fw, err := os.OpenFile(match, os.O_WRONLY|os.O_TRUNC, 0644)
 				if err != nil {
